@@ -282,3 +282,7 @@ Precision@1: 0.7000
 Precision@3: 0.9000
 Precision@5: 1.0000
 MRR: 0.8200
+
+### 2026-03-11
+Primeiro contato com o langchain:
+https://docs.langchain.com/oss/python/langchain/knowledge-base
