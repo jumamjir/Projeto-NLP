@@ -171,3 +171,15 @@ sudo rm /etc/apparmor.d/firefox
 #### Tarefa do dia
 
 * Ajustar o código que havíamos usado de `SentenceTransformers` para usar `Reranker` com base no exemplo da página do `SBert` de ontem
+
+### 2026-03-18
+
+* Apresentação do uso de rerankers com Langchain
+* [Uso de Langchain com código legado](https://colab.research.google.com/github/GabrielvanderSchmidt/LangChain-Experiments/blob/main/retrieval/2_stage_ir_legacy.ipynb)
+* [Uso de Langchain com wrapper de SentenceTransformers](https://colab.research.google.com/github/GabrielvanderSchmidt/LangChain-Experiments/blob/main/retrieval/2_stage_ir_nolegacy.ipynb)
+
+### 2026-03-19
+
+* VM deu problema com driver da NVidia
+* Portado para o Colab o código de uso de Langchain com rerankers
+* O resultado não foi satisfatório
