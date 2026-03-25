@@ -1064,3 +1064,346 @@ compression_retriever = ContextualCompressionRetriever(
 for i, doc in enumerate(compression_retriever.invoke("Qual é o componente mais fundamental de redes neurais?")):
     print(f"Top {i+1} match:")
     print(doc.page_content)
+
+
+
+
+### 2026-03-23
+
+Compreensão e instalação docanno: Ferramenta de anotação de dados. A ideia é usar isso para ter uma forma de avaliar o nosso pipeline independente de chunking/splitting do texto, 
+pois teremos posições absolutas em relação ao começo do documento (ao invés de pares pergunta-resposta do gold standard original).
+1) Entendimento processo Recuperação em Duas Etapas. Segue Codigo:
+
+=====
+from sentence_transformers import SentenceTransformer, util, CrossEncoder
+
+# -------------------------------
+# 1. Data base
+# -------------------------------
+qa_pairs = [
+    {
+        "question": "Quais são as vantagens do endereçamento multicast em comparação ao unicast e anycast?",
+        "answer": """O multicast é um tipo de transmissão onde se transmite um único pacote para todos os nós que fazem parte
+de um determinado endereço multicast. A vantagem em relação ao unicast é a economia de banda da rede,
+pois transmite um único pacote para vários nós ao mesmo tempo. Algumas transmissões de vídeos usam multicast."""
+    },
+    {
+        "question": "Além da forma preferencial de representação dos endereços IPv6, quais são os métodos de abreviação permitidos?",
+        "answer": """Pode-se suprimir zeros à esquerda de cada bloco de 16 bits. Outra forma é substituir sequências de blocos
+com valor zero por '::', mas isso só pode ser feito uma única vez no endereço."""
+    },
+    {
+        "question": "Qual foi a principal motivação para o desenvolvimento do protocolo IPv6?",
+        "answer": """O esgotamento dos endereços IPv4 devido ao crescimento da internet levou à criação do IPv6, com maior capacidade de endereçamento."""
+    },
+    {
+        "question": "Quais campos do cabeçalho IPv4 foram eliminados ou modificados no IPv6?",
+        "answer": """O IPv6 reduziu o número de campos no cabeçalho, mantendo alguns como version e endereços, e substituindo outros como total length por payload length."""
+    },
+    {
+        "question": "Quais são as regras do campo Flow Label no IPv6?",
+        "answer": """Hosts que não suportam devem usar valor zero. Pacotes com mesmo flow label devem ter mesmos endereços de origem e destino.
+O valor deve estar entre 1 e (2^20 - 1) e não deve ser reutilizado rapidamente."""
+    },
+    {
+        "question": "Como o campo Payload Length difere do Total Length?",
+        "answer": """O Payload Length conta apenas os dados após o cabeçalho, enquanto o Total Length do IPv4 inclui o cabeçalho."""
+    },
+    {
+        "question": "Qual é a função do campo Hop Limit no IPv6?",
+        "answer": """O Hop Limit evita que pacotes fiquem em loop. Ele é decrementado a cada roteador e quando chega a zero o pacote é descartado."""
+    },
+    {
+        "question": "Qual é o tamanho dos endereços IPv6?",
+        "answer": """Os endereços IPv6 possuem 128 bits, permitindo uma quantidade muito maior de endereços na internet."""
+    },
+    {
+        "question": "O que é um endereço anycast?",
+        "answer": """Anycast permite enviar um pacote para o servidor mais próximo dentro de um grupo, sendo útil para serviços distribuídos."""
+    },
+    {
+        "question": "Quais são os tipos de compatibilidade IPv4 no IPv6?",
+        "answer": """Existem endereços IPv4-compatíveis (::IPv4) e IPv4-mapeados (::FFFF:IPv4), usados para integração entre redes."""
+    }
+]
+
+# -------------------------------
+# 2. Pergunta do usuário
+# -------------------------------
+pergunta_usuario = "Para que serve o Hop Limit no IPv6?"
+
+# -------------------------------
+# 3. ETAPA 1 → Embedding (rápido)
+# -------------------------------
+modelo_embedding = SentenceTransformer('all-MiniLM-L6-v2')
+
+# PERGUNTA + RESPOSTA juntas
+textos = [qa["question"] + " " + qa["answer"] for qa in qa_pairs]
+
+emb_textos = modelo_embedding.encode(textos, convert_to_tensor=True)
+emb_pergunta = modelo_embedding.encode(pergunta_usuario, convert_to_tensor=True)
+
+similaridades = util.cos_sim(emb_pergunta, emb_textos)[0]
+
+top_k = 5
+top_resultados = similaridades.topk(k=top_k)
+
+candidatos = [qa_pairs[i] for i in top_resultados.indices]
+
+print("\n🔎 Etapa 1 - Candidatos:")
+for c in candidatos:
+    print("-", c["question"])
+
+# -------------------------------
+# 4. ETAPA 2 → Cross Encoder (preciso)
+# -------------------------------
+modelo_cross = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+
+pares = [
+    [pergunta_usuario, c["question"] + " " + c["answer"]]
+    for c in candidatos
+]
+
+scores = modelo_cross.predict(pares)
+
+# Ordena
+resultados_finais = sorted(
+    zip(candidatos, scores),
+    key=lambda x: x[1],
+    reverse=True
+)
+
+# -------------------------------
+# 5. Resultado final
+# -------------------------------
+print("\n🎯 Melhor resposta:\n")
+
+melhor = resultados_finais[0]
+
+print(f"Score: {melhor[1]:.4f}")
+print("\nPergunta relacionada:")
+print(melhor[0]["question"])
+
+print("\nResposta:")
+print(melhor[0]["answer"])
+
+
+----------
+2) Avaliar se está encontrando os trechos corretos. Segue código:
+# ================================
+# Instalação de bibliotecas
+# ================================
+!pip install -qU langchain google-generativeai faiss-cpu langchain_text_splitters langchain_community langchain_google_genai
+
+# ================================
+# 1. Imports
+# ================================
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_google_genai.embeddings import GenerativeAIEmbeddings  # Corrected import path
+import os
+from google.colab import userdata
+import google.generativeai as genai
+
+# Define a chave da API do Gemini usando os segredos do Colab
+os.environ["GOOGLE_API_KEY"] = userdata.get('GOOGLE_API_KEY')
+genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+
+# ================================
+# 2. dataset original
+# ================================
+qa_pairs = [
+    {
+        "question": "Quais são as vantagens do endereçamento multicast em comparação ao unicast e anycast?",
+        "answer": """O multicast é um tipo de transmissão onde se transmite um único pacote para todos os nós que fazem parte
+de um determinado endereço multicast. A vantagem em relação ao unicast é a economia de banda da rede,
+pois transmite um único pacote para vários nós ao mesmo tempo. Algumas transmissões de vídeos usam multicast."""
+    },
+    {
+        "question": "Além da forma preferencial de representação dos endereços IPv6, quais são os métodos de abreviação permitidos?",
+        "answer": """Pode-se suprimir zeros à esquerda de cada bloco de 16 bits. Outra forma é substituir sequências de blocos
+com valor zero por '::', mas isso só pode ser feito uma única vez no endereço."""
+    },
+    {
+        "question": "Qual foi a principal motivação para o desenvolvimento do protocolo IPv6?",
+        "answer": """O esgotamento dos endereços IPv4 devido ao crescimento da internet levou à criação do IPv6, com maior capacidade de endereçamento."""
+    },
+    {
+        "question": "Quais campos do cabeçalho IPv4 foram eliminados ou modificados no IPv6?",
+        "answer": """O IPv6 reduziu o número de campos no cabeçalho, mantendo alguns como version e endereços, e substituindo outros como total length por payload length."""
+    },
+    {
+        "question": "Quais são as regras do campo Flow Label no IPv6?",
+        "answer": """Hosts que não suportam devem usar valor zero. Pacotes com mesmo flow label devem ter mesmos endereços de origem e destino.
+O valor deve estar entre 1 e (2^20 - 1) e não deve ser reutilizado rapidamente."""
+    },
+    {
+        "question": "Como o campo Payload Length difere do Total Length?",
+        "answer": """O Payload Length conta apenas os dados após o cabeçalho, enquanto o Total Length do IPv4 inclui o cabeçalho."""
+    },
+    {
+        "question": "Qual é a função do campo Hop Limit no IPv6?",
+        "answer": """O Hop Limit evita que pacotes fiquem em loop. Ele é decrementado a cada roteador e quando chega a zero o pacote é descartado."""
+    },
+    {
+        "question": "Qual é o tamanho dos endereços IPv6?",
+        "answer": """Os endereços IPv6 possuem 128 bits, permitindo uma quantidade muito maior de endereços na internet."""
+    },
+    {
+        "question": "O que é um endereço anycast?",
+        "answer": """Anycast permite enviar um pacote para o servidor mais próximo dentro de um grupo, sendo útil para serviços distribuídos."""
+    },
+    {
+        "question": "Quais são os tipos de compatibilidade IPv4 no IPv6?",
+        "answer": """Existem endereços IPv4-compatíveis (::IPv4) e IPv4-mapeados (::FFFF:IPv4), usados para integração entre redes."""
+    }
+]
+
+# ================================
+# 3. Criar documento único (base)
+# ================================
+documento = "\n\n".join([qa["answer"] for qa in qa_pairs])
+
+# ================================
+# 4. Gerar posições automaticamente
+# ================================
+cursor = 0
+
+for qa in qa_pairs:
+    start = documento.find(qa["answer"], cursor)
+    end = start + len(qa["answer"])
+
+    qa["answer_start"] = start
+    qa["answer_end"] = end
+
+    cursor = end  # evita conflitos
+
+# ================================
+# 5. Chunking com posição
+# ================================
+def chunk_text_with_position(texto, chunk_size=300, overlap=50):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap
+    )
+
+    chunks = []
+    start = 0
+
+    for chunk in splitter.split_text(texto):
+        idx = texto.find(chunk, start)
+
+        chunks.append({
+            "text": chunk,
+            "start": idx,
+            "end": idx + len(chunk)
+        })
+
+        start = idx + 1
+
+    return chunks
+
+chunks = chunk_text_with_position(documento)
+
+# ================================
+# 6. Criar documentos LangChain
+# ================================
+docs = [
+    Document(
+        page_content=c["text"],
+        metadata={"start": c["start"], "end": c["end"]}
+    )
+    for c in chunks
+]
+
+# ================================
+# 7. Embeddings + FAISS
+# ================================
+embeddings = GenerativeAIEmbeddings(model="models/embedding-001")
+vectorstore = FAISS.from_documents(docs, embeddings)
+
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+# ================================
+# 8. Função de overlap
+# ================================
+def calcular_overlap(chunk_start, chunk_end, ans_start, ans_end):
+    inter_inicio = max(chunk_start, ans_start)
+    inter_fim = min(chunk_end, ans_end)
+
+    inter = max(0, inter_fim - inter_inicio)
+    tamanho_resposta = ans_end - ans_start
+
+    if inter == 0:
+        return 0
+
+    return inter / tamanho_resposta
+
+# ================================
+# 9. Avaliação
+# ================================
+def avaliar(qa_pairs, retriever):
+    total_corretos = 0
+    total_encontrados = 0
+    total_relevantes = len(qa_pairs)
+
+    resultados = []
+
+    for qa in qa_pairs:
+        docs_encontrados = retriever.invoke(qa["question"])
+
+        encontrou_completo = False
+
+        for doc in docs_encontrados:
+            score = calcular_overlap(
+                doc.metadata["start"],
+                doc.metadata["end"],
+                qa["answer_start"],
+                qa["answer_end"]
+            )
+
+            if score == 1:
+                encontrou_completo = True
+
+        if encontrou_completo:
+            total_corretos += 1
+
+        total_encontrados += len(docs_encontrados)
+
+        resultados.append({
+            "pergunta": qa["question"],
+            "acerto": encontrou_completo
+        })
+
+    # ================================
+    # 10. Métricas
+    # ================================
+    precision_at_k = total_corretos / total_encontrados
+    recall_at_k = total_corretos / total_relevantes
+    accuracy = total_corretos / total_relevantes
+
+    return resultados, {
+        "Precision@K": precision_at_k,
+        "Recall@K": recall_at_k,
+        "Accuracy": accuracy
+    }
+
+# ================================
+# 11. Executar
+# ================================
+resultados, metricas = avaliar(qa_pairs, retriever)
+
+for r in resultados:
+    print("\nPergunta:", r["pergunta"])
+    print("Acertou:", r["acerto"])
+
+print("\n📊 Métricas:")
+for k, v in metricas.items():
+    print(f"{k}: {v:.2f}")
+
+
+
+### 2026-03-24
+
+Pesquisa para  calcular as metricas explicitadas em sala  em cima do pipeline de information retrive.
