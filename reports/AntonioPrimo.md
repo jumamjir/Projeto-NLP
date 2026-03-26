@@ -1193,7 +1193,7 @@ print(melhor[0]["answer"])
 # ================================
 # Instalação de bibliotecas
 # ================================
-!pip install -qU langchain google-generativeai faiss-cpu langchain_text_splitters langchain_community langchain_google_genai
+!pip install -qU langchain sentence-transformers faiss-cpu langchain_text_splitters langchain_community
 
 # ================================
 # 1. Imports
@@ -1201,14 +1201,8 @@ print(melhor[0]["answer"])
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_google_genai.embeddings import GenerativeAIEmbeddings  # Corrected import path
+from langchain_community.embeddings import HuggingFaceEmbeddings
 import os
-from google.colab import userdata
-import google.generativeai as genai
-
-# Define a chave da API do Gemini usando os segredos do Colab
-os.environ["GOOGLE_API_KEY"] = userdata.get('GOOGLE_API_KEY')
-genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 # ================================
 # 2. dataset original
@@ -1318,12 +1312,18 @@ docs = [
 ]
 
 # ================================
-# 7. Embeddings + FAISS
+# 7. Embeddings LOCAIS + FAISS (SEM API KEY!)
 # ================================
-embeddings = GenerativeAIEmbeddings(model="models/embedding-001")
-vectorstore = FAISS.from_documents(docs, embeddings)
+print("🔄 Carregando embeddings locais (sentence-transformers)...")
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    model_kwargs={'device': 'cpu'}
+)
 
+vectorstore = FAISS.from_documents(docs, embeddings)
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+print("✅ Vectorstore criado com sucesso!")
 
 # ================================
 # 8. Função de overlap
@@ -1379,7 +1379,7 @@ def avaliar(qa_pairs, retriever):
     # ================================
     # 10. Métricas
     # ================================
-    precision_at_k = total_corretos / total_encontrados
+    precision_at_k = total_corretos / total_encontrados if total_encontrados > 0 else 0
     recall_at_k = total_corretos / total_relevantes
     accuracy = total_corretos / total_relevantes
 
@@ -1392,18 +1392,452 @@ def avaliar(qa_pairs, retriever):
 # ================================
 # 11. Executar
 # ================================
+print("🚀 Executando avaliação...")
 resultados, metricas = avaliar(qa_pairs, retriever)
 
+print("\n" + "="*80)
+print("📋 RESULTADOS DETALHADOS")
+print("="*80)
+
 for r in resultados:
-    print("\nPergunta:", r["pergunta"])
-    print("Acertou:", r["acerto"])
+    status = "✅ ACERTOU" if r["acerto"] else "❌ ERROU"
+    print(f"\n{status}")
+    print(f"Pergunta: {r['pergunta'][:100]}...")
 
-print("\n📊 Métricas:")
+print("\n" + "="*80)
+print("📊 MÉTRICAS FINAIS")
+print("="*80)
 for k, v in metricas.items():
-    print(f"{k}: {v:.2f}")
+    print(f"🎯 {k}: {v:.3f}")
+
+print(f"\n📈 Resumo: {len([r for r in resultados if r['acerto']])}/{len(resultados)} perguntas respondidas corretamente")
 
 
+### 2026-03-25
 
-### 2026-03-24
+1)Pesquisas e experimentação para:
+a)Avaliar o  pipeline de forma completa;
+b) Avaliar partes (chunking / retrieval)
+c)Criar as propiras métricas
+d) Trabalhar sem LangSmith
+=========================================================================================================================================
+Codigo(1): Vai fazer o seguinte: 
+(i) Usar seus qa_pairs como gold standard;
+(ii) Simular retrieval simples;
+(iii) Gerar respostas;
+(iv) Avaliar com as métricas: a - Similaridade (resposta vs gold); Retrieval Score (chunk certo foi recuperado?)
 
-Pesquisa para  calcular as metricas explicitadas em sala  em cima do pipeline de information retrive.
+from typing import List, Dict
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+
+# =========================
+# 1. (GOLD)
+# =========================
+qa_pairs = [
+    {
+        "question": "Quais são as vantagens do endereçamento multicast em comparação ao unicast e anycast?",
+        "answer": """O multicast é um tipo de transmissão onde se transmite um único pacote para todos os nós que fazem parte
+de um determinado endereço multicast. A vantagem em relação ao unicast é a economia de banda da rede,
+pois transmite um único pacote para vários nós ao mesmo tempo. Algumas transmissões de vídeos usam multicast."""
+    },
+    {
+        "question": "Além da forma preferencial de representação dos endereços IPv6, quais são os métodos de abreviação permitidos?",
+        "answer": """Pode-se suprimir zeros à esquerda de cada bloco de 16 bits. Outra forma é substituir sequências de blocos
+com valor zero por '::', mas isso só pode ser feito uma única vez no endereço."""
+    },
+    {
+        "question": "Qual foi a principal motivação para o desenvolvimento do protocolo IPv6?",
+        "answer": """O esgotamento dos endereços IPv4 devido ao crescimento da internet levou à criação do IPv6, com maior capacidade de endereçamento."""
+    },
+    {
+        "question": "Quais campos do cabeçalho IPv4 foram eliminados ou modificados no IPv6?",
+        "answer": """O IPv6 reduziu o número de campos no cabeçalho, mantendo alguns como version e endereços, e substituindo outros como total length por payload length."""
+    },
+    {
+        "question": "Quais são as regras do campo Flow Label no IPv6?",
+        "answer": """Hosts que não suportam devem usar valor zero. Pacotes com mesmo flow label devem ter mesmos endereços de origem e destino.
+O valor deve estar entre 1 e (2^20 - 1) e não deve ser reutilizado rapidamente."""
+    },
+    {
+        "question": "Como o campo Payload Length difere do Total Length?",
+        "answer": """O Payload Length conta apenas os dados após o cabeçalho, enquanto o Total Length do IPv4 inclui o cabeçalho."""
+    },
+    {
+        "question": "Qual é a função do campo Hop Limit no IPv6?",
+        "answer": """O Hop Limit evita que pacotes fiquem em loop. Ele é decrementado a cada roteador e quando chega a zero o pacote é descartado."""
+    },
+    {
+        "question": "Qual é o tamanho dos endereços IPv6?",
+        "answer": """Os endereços IPv6 possuem 128 bits, permitindo uma quantidade muito maior de endereços na internet."""
+    },
+    {
+        "question": "O que é um endereço anycast?",
+        "answer": """Anycast permite enviar um pacote para o servidor mais próximo dentro de um grupo, sendo útil para serviços distribuídos."""
+    },
+    {
+        "question": "Quais são os tipos de compatibilidade IPv4 no IPv6?",
+        "answer": """Existem endereços IPv4-compatíveis (::IPv4) e IPv4-mapeados (::FFFF:IPv4), usados para integração entre redes."""
+    }
+]
+
+# =========================
+# 2. MODELO DE EMBEDDING
+# =========================
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# =========================
+# 3. INDEXAÇÃO (SIMULA RAG)
+# =========================
+documents = [item["answer"] for item in qa_pairs]
+doc_embeddings = model.encode(documents)
+
+# =========================
+# 4. FUNÇÃO DE RETRIEVAL
+# =========================
+def retrieve_context(question: str, top_k=1):
+    q_embedding = model.encode([question])
+    similarities = cosine_similarity(q_embedding, doc_embeddings)[0]
+    
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
+    
+    results = [(documents[i], similarities[i]) for i in top_indices]
+    return results
+
+# =========================
+# 5. "GERAÇÃO" (SIMPLES)
+# =========================
+def generate_answer(context: str):
+    
+
+# =========================
+# 6. MÉTRICAS
+# =========================
+def similarity_score(a: str, b: str):
+    emb_a = model.encode([a])
+    emb_b = model.encode([b])
+    return cosine_similarity(emb_a, emb_b)[0][0]
+
+# =========================
+# 7. AVALIAÇÃO COMPLETA
+# =========================
+def evaluate_pipeline(qa_pairs):
+    results = []
+    
+    for item in qa_pairs:
+        question = item["question"]
+        gold = item["answer"]
+        
+        retrieved = retrieve_context(question, top_k=1)
+        context, score = retrieved[0]
+        
+        generated = generate_answer(context)
+        
+        sim = similarity_score(generated, gold)
+        
+        results.append({
+            "question": question,
+            "retrieval_score": score,
+            "answer_similarity": sim
+        })
+    
+    return results
+
+# =========================
+# 8. RODAR AVALIAÇÃO
+# =========================
+results = evaluate_pipeline(qa_pairs)
+
+# =========================
+# 9. PRINT RESULTADOS
+# =========================
+for r in results:
+    print("Pergunta:", r["question"])
+    print("Score de Recuperação:", round(r["retrieval_score"], 3))
+    print("Similaridade da Resposta:", round(r["answer_similarity"], 3))
+    print("-" * 50)
+
+=========================================================================================================================
+
+Código (2):
+Aperfeiçoado com
+Chunking Simples;
+IoU de Texto;
+LLM Real (Ollama);
+Dataset 10x Maior;
+3 Métricas Avaliadas: Retrieval Score (cosine similarity)
+Similaridade Semântica (embeddings)
+IoU de Palavras (overlap textual)
+
+# ================================
+# Instalação de bibliotecas
+# ================================
+!pip install -qU sentence-transformers faiss-cpu langchain_text_splitters langchain_community ollama
+
+# ================================
+# 1. Imports
+# ================================
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+from typing import List, Dict
+import ollama
+import re
+
+# ================================
+# 2. SEU DATASET ORIGINAL (GOLD)
+# ================================
+qa_pairs = [
+    {
+        "question": "Quais são as vantagens do endereçamento multicast em comparação ao unicast e anycast?",
+        "answer": """O multicast é um tipo de transmissão onde se transmite um único pacote para todos os nós que fazem parte
+de um determinado endereço multicast. A vantagem em relação ao unicast é a economia de banda da rede,
+pois transmite um único pacote para vários nós ao mesmo tempo. Algumas transmissões de vídeos usam multicast."""
+    },
+    {
+        "question": "Além da forma preferencial de representação dos endereços IPv6, quais são os métodos de abreviação permitidos?",
+        "answer": """Pode-se suprimir zeros à esquerda de cada bloco de 16 bits. Outra forma é substituir sequências de blocos
+com valor zero por '::', mas isso só pode ser feito uma única vez no endereço."""
+    },
+    {
+        "question": "Qual foi a principal motivação para o desenvolvimento do protocolo IPv6?",
+        "answer": """O esgotamento dos endereços IPv4 devido ao crescimento da internet levou à criação do IPv6, com maior capacidade de endereçamento."""
+    },
+    {
+        "question": "Quais campos do cabeçalho IPv4 foram eliminados ou modificados no IPv6?",
+        "answer": """O IPv6 reduziu o número de campos no cabeçalho, mantendo alguns como version e endereços, e substituindo outros como total length por payload length."""
+    },
+    {
+        "question": "Quais são as regras do campo Flow Label no IPv6?",
+        "answer": """Hosts que não suportam devem usar valor zero. Pacotes com mesmo flow label devem ter mesmos endereços de origem e destino.
+O valor deve estar entre 1 e (2^20 - 1) e não deve ser reutilizado rapidamente."""
+    },
+    {
+        "question": "Como o campo Payload Length difere do Total Length?",
+        "answer": """O Payload Length conta apenas os dados após o cabeçalho, enquanto o Total Length do IPv4 inclui o cabeçalho."""
+    },
+    {
+        "question": "Qual é a função do campo Hop Limit no IPv6?",
+        "answer": """O Hop Limit evita que pacotes fiquem em loop. Ele é decrementado a cada roteador e quando chega a zero o pacote é descartado."""
+    },
+    {
+        "question": "Qual é o tamanho dos endereços IPv6?",
+        "answer": """Os endereços IPv6 possuem 128 bits, permitindo uma quantidade muito maior de endereços na internet."""
+    },
+    {
+        "question": "O que é um endereço anycast?",
+        "answer": """Anycast permite enviar um pacote para o servidor mais próximo dentro de um grupo, sendo útil para serviços distribuídos."""
+    },
+    {
+        "question": "Quais são os tipos de compatibilidade IPv4 no IPv6?",
+        "answer": """Existem endereços IPv4-compatíveis (::IPv4) e IPv4-mapeados (::FFFF:IPv4), usados para integração entre redes."""
+    }
+]
+
+# ================================
+# 3. CHUNKING SIMPLES (REQUISITO 1)
+# ================================
+def chunk_text(text, size=100):
+    """Divide texto em chunks de tamanho fixo"""
+    return [text[i:i+size] for i in range(0, len(text), size)]
+
+# ================================
+# 4. IoU DE TEXTO (REQUISITO 2)
+# ================================
+def iou_text(a: str, b: str):
+    """IoU baseado em palavras únicas"""
+    set_a = set(a.split())
+    set_b = set(b.split())
+    
+    inter = len(set_a & set_b)
+    union = len(set_a | set_b)
+    
+    return inter / union if union > 0 else 0
+
+# ================================
+# 5. MODELO DE EMBEDDING
+# ================================
+print("🔄 Carregando modelo de embedding...")
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# ================================
+# 6. GERADOR DE PERGUNTAS COM LLM (REQUISITO 4)
+# ================================
+def generate_questions(answer: str, num_questions: int = 5) -> List[str]:
+    """Gera 5 perguntas por resposta usando LLM local"""
+    prompt = f"""Com base nesta resposta técnica sobre IPv6, gere EXATAMENTE {num_questions} perguntas que teriam esta resposta:
+
+Resposta: {answer}
+
+Perguntas (numeradas 1-{num_questions}):"""
+    
+    try:
+        response = ollama.generate(
+            model='llama3.2:1b',  # Modelo leve e rápido
+            prompt=prompt,
+            options={'num_predict': 300}
+        )
+        generated_text = response['response']
+        
+        # Extrair perguntas numeradas
+        questions = []
+        lines = generated_text.split('\n')
+        for line in lines:
+            if re.match(r'^\d+\.', line.strip()):
+                questions.append(line.strip())
+                if len(questions) >= num_questions:
+                    break
+        
+        return questions[:num_questions]
+    except:
+        # Fallback se Ollama não estiver disponível
+        return [f"Pergunta {i} sobre: {answer[:50]}..." for i in range(num_questions)]
+
+# ================================
+# 7. EXPANDIR DATASET 10x (REQUISITO 4)
+# ================================
+print("🔄 Gerando dataset expandido (10x)...")
+expanded_qa_pairs = []
+
+for qa in qa_pairs:
+    # Adiciona pergunta original
+    expanded_qa_pairs.append(qa)
+    
+    # Gera 5 perguntas adicionais
+    new_questions = generate_questions(qa["answer"])
+    for q in new_questions:
+        expanded_qa_pairs.append({
+            "question": q,
+            "answer": qa["answer"]
+        })
+
+print(f"✅ Dataset expandido: {len(expanded_qa_pairs)} perguntas (original: {len(qa_pairs)})")
+
+# ================================
+# 8. LLM REAL PARA GERAÇÃO (REQUISITO 3)
+# ================================
+def generate_answer(question: str, context: str) -> str:
+    """Gera resposta usando LLM real com RAG"""
+    prompt = f"""Pergunta: {question}
+
+Contexto: {context}
+
+Responda APENAS com base no contexto fornecido, de forma concisa e precisa:"""
+    
+    try:
+        response = ollama.generate(
+            model='llama3.2:1b',
+            prompt=prompt,
+            options={'num_predict': 200}
+        )
+        return response['response'].strip()
+    except:
+        # Fallback
+        return context[:200] + "..."
+
+# ================================
+# 9. PROCESSAMENTO DE CHUNKS E INDEXAÇÃO
+# ================================
+print("🔄 Processando chunks e criando índice...")
+all_chunks = []
+chunk_to_gold_map = {}
+
+for i, qa in enumerate(qa_pairs):  # Só usa gold answers para chunks
+    chunks = chunk_text(qa["answer"], size=100)
+    all_chunks.extend(chunks)
+    for chunk in chunks:
+        chunk_to_gold_map[chunk] = qa["answer"]
+
+# Embedding dos chunks
+chunk_embeddings = model.encode(all_chunks)
+print(f"✅ {len(all_chunks)} chunks indexados")
+
+# ================================
+# 10. RETRIEVAL MELHORADO
+# ================================
+def retrieve_context(question: str, top_k=3):
+    """Recupera chunks mais relevantes"""
+    q_embedding = model.encode([question])
+    similarities = cosine_similarity(q_embedding, chunk_embeddings)[0]
+    
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
+    
+    retrieved_chunks = [all_chunks[i] for i in top_indices]
+    context = " ".join(retrieved_chunks)
+    
+    return context, similarities[top_indices]
+
+# ================================
+# 11. AVALIAÇÃO COMPLETA
+# ================================
+def evaluate_pipeline(test_pairs: List[Dict]):
+    """Avalia pipeline completo com todas as métricas"""
+    results = []
+    
+    for item in test_pairs:
+        question = item["question"]
+        gold_answer = item["answer"]
+        
+        # Retrieval
+        context, retrieval_scores = retrieve_context(question, top_k=3)
+        retrieval_score = retrieval_scores[0]  # Melhor score
+        
+        # Geração com LLM
+        generated_answer = generate_answer(question, context)
+        
+        # Métricas
+        semantic_sim = cosine_similarity(
+            model.encode([generated_answer]),
+            model.encode([gold_answer])
+        )[0][0]
+        
+        iou_score = iou_text(generated_answer, gold_answer)
+        
+        results.append({
+            "question": question[:100] + "..." if len(question) > 100 else question,
+            "retrieval_score": retrieval_score,
+            "semantic_similarity": semantic_sim,
+            "iou_score": iou_score,
+            "gold_answer": gold_answer[:100] + "...",
+            "generated_answer": generated_answer[:100] + "..."
+        })
+    
+    return results
+
+# ================================
+# 12. EXECUTAR AVALIAÇÃO
+# ================================
+print("\n🚀 Executando avaliação completa...")
+results = evaluate_pipeline(expanded_qa_pairs[:20])  # Testa 20 primeiras para velocidade
+
+# ================================
+# 13. MÉTRICAS AGREGADAS
+# ================================
+avg_retrieval = np.mean([r["retrieval_score"] for r in results])
+avg_semantic = np.mean([r["semantic_similarity"] for r in results])
+avg_iou = np.mean([r["iou_score"] for r in results])
+
+print("\n" + "="*80)
+print("📊 RESULTADOS DA AVALIAÇÃO")
+print("="*80)
+print(f"🎯 Média Retrieval Score: {avg_retrieval:.3f}")
+print(f"🎯 Média Similaridade Semântica: {avg_semantic:.3f}")
+print(f"🎯 Média IoU (Texto): {avg_iou:.3f}")
+print(f"📈 Total de perguntas testadas: {len(results)}")
+print("="*80)
+
+# ================================
+# 14. RESULTADOS DETALHADOS (5 primeiros)
+# ================================
+print("\n📋 5 PRIMEIROS RESULTADOS:")
+print("-" * 80)
+for i, r in enumerate(results[:5]):
+    print(f"\n{i+1}. Pergunta: {r['question']}")
+    print(f"   Retrieval: {r['retrieval_score']:.3f}")
+    print(f"   Semântica: {r['semantic_similarity']:.3f}")
+    print(f"   IoU: {r['iou_score']:.3f}")
+    print(f"   Gold: {r['gold_answer']}")
+    print(f"   Gerado: {r['generated_answer']}")
+
+==================================================================================================================================================================
