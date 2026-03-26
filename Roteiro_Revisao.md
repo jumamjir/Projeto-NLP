@@ -1,12 +1,9 @@
----
-marp: true
----
+# Roteiro de Revisão - Projeto NLP
 
-Roteiro de Revisão - Projeto NLP
 Construindo um Pipeline de Recuperação de Informação com Re-ranking
 
 
-Índice
+## Índice
 
     Introdução
 
@@ -27,6 +24,8 @@ Construindo um Pipeline de Recuperação de Informação com Re-ranking
     Resumo e Próximos Passos
 
     Referências
+
+---
 
 1. Introdução <a name="introdução"></a>
 
@@ -80,9 +79,12 @@ def extrair_texto_pdf(caminho_pdf):
         texto_completo += texto
     return texto_completo
 
-# Uso
+### Uso
+
+```python
 texto = extrair_texto_pdf("contrato.pdf")
 print(f"Total de páginas: {texto.count('--- Página')}")
+```
 
 3.2 Limpeza de Texto
 
@@ -98,9 +100,10 @@ Após a extração, é comum aplicar técnicas de limpeza:
 4.1 O que é um Gold Standard?
 
 É um conjunto de pares pergunta–resposta que serve como referência para avaliar o sistema. Idealmente, cada resposta deve estar associada à posição exata (início e fim) no documento original, permitindo métricas precisas.
-4.2 Exemplo de Estrutura
-python
 
+4.2 Exemplo de Estrutura
+
+```python
 qa_pairs = [
     {
         "question": "Quais são as vantagens do endereçamento multicast?",
@@ -115,23 +118,30 @@ qa_pairs = [
         "answer_end": 10234
     }
 ]
+```
 
 4.3 Importância das Posições
 
 Registrar as posições permite avaliar se o retrieval encontrou exatamente o trecho correto (IoU = 1), não apenas um texto semanticamente similar.
+
 5. Embeddings e Busca Semântica <a name="embeddings"></a>
+
 5.1 O que são Embeddings?
 
 Embeddings são vetores de números reais que representam o significado de um texto. Textos com significados próximos ficam próximos no espaço vetorial.
+
 5.2 Modelos de Sentence Transformers
 
 Testamos três modelos principais:
-Modelo	Uso	Métrica de Similaridade
-multi-qa-mpnet-base-cos-v1	Busca semântica	Cosseno
-multi-qa-mpnet-base-dot-v1	Busca semântica	Produto escalar
-msmarco-bert-base-dot-v5	Passagens MSMARCO	Produto escalar
+| Modelo | Uso | Métrica de Similaridade |
+|---|---|---|
+| multi-qa-mpnet-base-cos-v1 | Busca semântica |Cosseno |
+| multi-qa-mpnet-base-dot-v1 | Busca semântica |Produto escalar |
+| msmarco-bert-base-dot-v5 | Passagens MSMARCO | Produto escalar |
+
 5.3 Exemplo Prático
-python
+
+```python
 
 from sentence_transformers import SentenceTransformer, util
 
@@ -146,8 +156,10 @@ query_emb = model.encode("Como evitar pacotes perdidos?")
 
 scores = util.cos_sim(query_emb, doc_embs)[0]
 print(scores)  # [0.85, 0.12]
+```
 
 6. LangChain na Prática <a name="langchain"></a>
+
 6.1 O Ecossistema LangChain
 
 LangChain oferece componentes modulares para construir pipelines de NLP. Usamos:
@@ -161,7 +173,8 @@ LangChain oferece componentes modulares para construir pipelines de NLP. Usamos:
     Vector Stores: Armazenar embeddings (Chroma, FAISS).
 
 6.2 Pipeline Completo
-python
+
+```python
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -197,11 +210,14 @@ resultados = vector_store.similarity_search(
     "O que é multicast?",
     k=3
 )
+```
 
 6.3 Adicionando Metadados
 
 É útil preservar metadados como posição, página e nome do documento para avaliação.
+
 7. Two-Stage Retrieval – Retrieve + Re-rank <a name="twostage"></a>
+
 7.1 Motivação
 
     Bi-Encoder (retrieve) é rápido, mas menos preciso.
@@ -216,7 +232,8 @@ resultados = vector_store.similarity_search(
     Re-rank: Cross-Encoder reordena esses candidatos, selecionando os melhores (ex: 3).
 
 7.3 Implementação com Sentence Transformers
-python
+
+```python
 
 from sentence_transformers import SentenceTransformer, CrossEncoder, util
 
@@ -236,19 +253,26 @@ def two_stage_search(query, corpus, top_k_retrieve=10, top_k_rerank=3):
     
     ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
     return ranked[:top_k_rerank]
+```
 
 7.4 Integração com LangChain
 
 Para usar com LangChain, podemos empacotar o CrossEncoderReranker (da langchain_classic) ou criar um retriever personalizado.
+
 8. Avaliação de Pipeline RAG <a name="avaliação"></a>
+
 8.1 Métricas Fundamentais
-Métrica	Descrição	Fórmula / Cálculo
-Precision@K	Fração de resultados relevantes entre os K recuperados.	acertos / K
-Recall@K	Fração de documentos relevantes recuperados entre todos os relevantes.	acertos / total_relevantes
-IoU (Interseção sobre União)	Similaridade textual entre resposta gerada e gold.	|palavras_resposta ∩ palavras_gold| / |palavras_resposta ∪ palavras_gold|
-Similaridade Semântica	Cosseno entre embeddings da resposta gerada e gold.	cos_sim(emb_resp, emb_gold)
+
+| Métrica | Descrição | Fórmula / Cálculo | 
+|---|---|---|
+Precision@K	| Fração de resultados relevantes entre os K recuperados. | acertos / K |
+| Recall@K | Fração de documentos relevantes recuperados entre todos os relevantes. | acertos / total_relevantes |
+| IoU (Interseção sobre União) | Similaridade textual entre resposta gerada e gold. | [palavras_resposta ∩ palavras_gold] / [palavras_resposta ∪ palavras_gold] |
+| Similaridade Semântica | Cosseno entre embeddings da resposta gerada e gold. | cos_sim(emb_resp, emb_gold) |
+
 8.2 Avaliação com Posições
-python
+
+```python
 
 def calcular_overlap(chunk_start, chunk_end, ans_start, ans_end):
     inter_inicio = max(chunk_start, ans_start)
@@ -267,9 +291,11 @@ def avaliar_retrieval(pergunta, gold_start, gold_end, chunks_retornados):
         if overlap == 1.0:
             return True  # chunk exato recuperado
     return False
+```
 
 8.3 Avaliação Completa do Pipeline
-python
+
+```python
 
 def avaliar_pipeline(qa_pairs, retriever, llm):
     metricas = {"retrieval": [], "semantic": [], "iou": []}
@@ -289,14 +315,17 @@ def avaliar_pipeline(qa_pairs, retriever, llm):
         metricas["iou"].append(iou)
     
     return {k: np.mean(v) for k, v in metricas.items()}
+```
 
 9. Resumo e Próximos Passos <a name="resumo"></a>
-9.1 Arquitetura Final
-text
 
+9.1 Arquitetura Final
+
+```text
 PDF → Extração → Chunking → Embeddings → Vector Store → Retrieve → Re-rank → Geração
  ↑        ↑          ↑            ↑            ↑           ↑          ↑         ↑
 PyMuPDF  Limpeza  TextSplitter  Bi-Encoder  Chroma/FAISS  Rápido  Cross-Encoder  LLM
+```
 
 9.2 Principais Aprendizados
 
@@ -349,7 +378,8 @@ PyMuPDF  Limpeza  TextSplitter  Bi-Encoder  Chroma/FAISS  Rápido  Cross-Encoder
     Cross-Encoder Models
 
 Apêndice: Exemplo Completo de Pipeline com Avaliação
-python
+
+```python
 
 # ================================
 # Instalação (em notebook)
@@ -412,17 +442,4 @@ avg_score = np.mean([r["score"] for r in results])
 avg_sim = np.mean([r["similarity"] for r in results])
 print(f"Avg Retrieval Score: {avg_score:.3f}")
 print(f"Avg Semantic Similarity: {avg_sim:.3f}")
-
-Fim do Ebook
-Como gerar o PDF
-
-    Salve este conteúdo em um arquivo chamado ebook_revisao_nlp.md.
-
-    Converta para PDF usando uma das opções abaixo:
-
-        Pandoc (linha de comando):
-        bash
-
-        pandoc ebook_revisao_nlp.md -o ebook_revisao_nlp.pdf --pdf-engine=xelatex
-
-        Markdown to PDF (extensão do VS Code ou plugin).
+```
