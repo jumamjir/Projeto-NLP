@@ -1841,3 +1841,190 @@ for i, r in enumerate(results[:5]):
     print(f"   Gerado: {r['generated_answer']}")
 
 ==================================================================================================================================================================
+
+#2026-26-03 e 2006-27-03
+
+Adaptaçao codigo docanno.
+
+Gerado arquivo json para localizacao das respostas no PDF.
+
+import json
+import re
+from pathlib import Path
+
+
+# Lista de QA pairs 
+qa_pairs = [
+    {
+        "question": "Quais são as vantagens do endereçamento multicast em comparação ao unicast e anycast?",
+        "answer": """O multicast é um tipo de transmissão onde se transmite um único pacote para todos os nós que fazem parte
+de um determinado endereço multicast. A vantagem que uma transmissão tem em relação ao unicast é a
+economia de banda da rede, pois transmite um único pacote para vários nós ao mesmo tempo, o que não
+ocorre com uma transmissão unicast, onde é transmitido um pacote para cada nó da rede. Algumas
+transmissões de vídeos pela rede usam multicast, economizando assim a banda da rede - Pagina 22 - Primeiro paragrafo do item 2.3.2"""
+    },
+    {
+        "question": "Além da forma preferencial de representação dos endereços IPv6, quais são os métodos de abreviação permitidos?",
+        "answer": """i) Um dos métodos utilizados na representação do endereçamento é de suprimir os zeros da esquerda de cada
+parte de 16 bits [HID 98]. Para exemplificar este método, usaremos como exemplo “1.2.2”. Aplicando o
+método de representação, o exemplo ficaria da seguinte forma:
+1080:8:0:800:0:0:0:0.;
+
+ii) Outra forma de simplificar é suprimir as seqüências de 16 bits com valores iguais a zero. Assim, os
+exemplos 1.2.2 e 1.2.3 ficariam respectivamente 1080:0008:0000:0800:: e 3FFE:2B00:0100:0107::0001.
+Deve-se ter o cuidado de suprimir somente uma seqüência de 16 bits. Ou seja, considerando o exemplo
+1.2.2, ele não poderia ficar assim 1080:0008::0800::. Pode se ver que ele tem duas vezes o sinal de dois
+pontos juntos o que seria inválido. Somente se pode ter uma única vez os sinais de dois pontos juntos [HID
+98].
+
+página 17 - Segundo e terceiro paragrafo do item 2.2"""
+    },
+    {
+        "question": "Qual foi a principal motivação para o desenvolvimento do protocolo IPv6, considerando o contexto de esgotamento dos endereços IPv4 na década de 1990?",
+        "answer": """Desde 1990 já se sabia da necessidade de aumentar o endereçamento dos números IPs, devido ao grande
+aumento que estava ocorrendo na Internet e que em pouco tempo se esgotariam os números IPs. Este
+problema eminente foi resolvido em duas etapas, a primeira foi a redistribuição dos endereços através da
+proposta do Classless Inter-Domain Routing (CIDR), especificado na RFC 1518 e 1519. Isto deu um tempo
+a mais para a criação de uma nova proposta de endereçamento [SAL 00]. A segunda etapa foi a criação de
+um novo protocolo que aumentaria os endereços IPs. Então a IETF (Internet Engineering Task Force) criou
+um grupo de trabalho para desenvolver o novo protocolo chamado inicialmente de IPng (Internet Protocol
+New Generation), o qual iria substituir o protocolo atual que passou a ser denominado IPv4 (Internet
+Protocol version 4). Então, em 1994, após várias discussões e revisões de propostas para o novo protocolo,
+o grupo de trabalho do IPng decidiu que caminho seguir. A proposta escolhida foi o SIPP (Simple IP Plus)
+[SIL 97] - Página 16 - quarto paragrafo."""
+    },
+    {
+        "question": "Quais campos do cabeçalho IPv4 foram eliminados ou modificados no cabeçalho base do IPv6 para simplificar o processamento pelos roteadores?",
+        "answer": """Portanto, dos quatorze campos que existem na
+versão anterior, passou-se a ter oito campos na nova versão do IP. Somente três campos continuam com a
+mesma denominação e função, que são: version, source address e destination address. Alguns campos
+como, por exemplo, o total length do IPv4 foi substituído por payload length e teve uma pequena mudança
+como será visto mais adiante - página 26 - primeiro paragrafo."""
+    },
+    {
+        "question": "Quais são as regras fundamentais para a implementação e uso correto do campo Flow Label no cabeçalho IPv6?",
+        "answer": """Existem três regras a serem cumpridas quando é implementado o uso do flow label, estas regras são [STA
+00]:
+
+ - Host e roteadores que não suportam o flow label devem, ao criar o pacote, atribuir o valor zero para
+o campo, não modificar o campo quando for repassar o pacote e ignorar o campo quando receber o
+pacote.
+ - Os pacotes criados por um nó com o mesmo valor e não zero do flow label devem ter o mesmo
+endereço destino e origem, e se for o caso, o Hop-by-hop Options Header e Routing Header iguais
+(estes dois cabeçalhos serão apresentados no capitulo dois).
+ - Para obter um valor flow label para um fluxo de dados, deve ser escolhido um valor na faixa entre 1
+e (220 – 1) e não se deve reusar o mesmo valor do flow label para um novo fluxo de dados quando
+terminar o tempo de vida do primeiro. O valor zero é reservado para informar que o campo não está
+sendo usado. Página 26 e 27 do item 2.4 - terceiro paragrafo."""
+    },
+    {
+        "question": "Como o campo Payload Length do IPv6 difere do campo Total Length do IPv4 em termos de escopo de contagem?",
+        "answer": """O campo Payload Length é equivalente ao campo total length (tamanho total) no IPv4. A diferença entre
+eles é que, por definição, o payload length significa somente o tamanho de dados em octetos após o
+cabeçalho, excluindo o tamanho do cabeçalho. Isso não ocorria no IPv4, que contabilizava tudo, inclusive o
+cabeçalho [HUI 00]. 4 paragrafo - pagina 27"""
+    },
+    {
+        "question": "Qual é a função do campo Hop Limit no IPv6 e como ele evita que pacotes fiquem indefinidamente em loop na rede?",
+        "answer": """O campo Hop Limit é um inteiro positivo de 8 bits de tamanho. Sua funcionalidade é de saber quando o
+pacote deve ser descartado por um roteador, assim, o pacote não ficará vagando eternamente pela rede, se
+não for encontrado o seu destino. Funciona da seguinte forma: cada vez que o pacote é passado adiante
+por um roteador, e seu valor é decrementado de um. Quando o valor for igual a zero, o pacote é descartado
+[SAL 00]. sexto paragrafo - pagina 27"""
+    },
+    {
+        "question": "Qual é o tamanho dos campos de endereço de origem e destino no IPv6 e qual a principal consequência desse aumento em relação à capacidade de endereçamento da Internet?",
+        "answer": """Os campos source address e destination address são, respectivamente, os endereços de origem e destino
+do pacote. Cada um destes campos possui o tamanho de 128 bits [DEE 98]. sétimo paragrafo - pagina 27"""
+    },
+    {
+        "question": "O que caracteriza um endereço anycast e em que situações práticas ele é mais vantajoso que o unicast ou multicast?",
+        "answer": """O conceito de endereço anycast é mais recente do que o unicast e o multicast. Pode-se dizer que o anycast
+é uma mistura do unicast e do multicast. A finalidade deste endereço pode ser exemplificada numa situação,
+onde se deseja requisitar um servidor de nomes de uma rede. A máquina requisitante irá enviar um pacote
+para um determinado endereço anycast, que todos os servidores de nome possuem. O roteador se
+encarregará de entregar o pacote ao servidor mais próximo da máquina que requisitou [HUI 98]. pagina 27 - primeiro paragrafo do item 2.3.3"""
+    },
+    {
+        "question": "Quais são os dois tipos de endereços IPv6 utilizados para compatibilidade com redes IPv4?",
+        "answer": """Endereço de translação para IPV4:
+Como existe a idéia do IPv6 substituir aos poucos as redes IPv4, foi criado um mecanismo para fazer o
+tunelamento dinamicamente de pacotes IPv6 para pacotes IPv4. Os nós que usam esta técnica têm um
+endereço unicast especial, que carrega nos 32-bits de baixa prioridade um endereço IPv4. Os restantes dos
+96 bits são representados por zeros. Esta técnica é chamada de IPv4, compatível com endereço IPv6 [HID
+98]. O endereço 0:0:0:0:0:0:10.16.169.1 (ou ::10.16.169.1) é um exemplo dessa técnica.
+Existe também um segundo tipo de endereço de translação que é o mapeamento do IPv4 para endereço
+IPv6. Ou seja, serve para representar nós que não suportam endereços IPv6. Foi definido que este tipo de
+endereço possui os 80 primeiros bits de alta prioridade com valores zero. Os 16 bits após têm o valor um e
+os 32 bits restantes representam um endereço IPv4 [HID 98]. Um exemplo deste tipo de mapeamento é
+representado pelo endereço 0:0:0:0:0:FFFF:10.16.169.1, ou simplificando ::FFFF:10.16.169.1. - página 20 - segundo paragrafo."""
+    }
+]
+
+# Mapeamento de ordinal para índice zero-based
+ordinal_to_index = {
+    "primeiro": 0,
+    "segundo": 1,
+    "terceiro": 2,
+    "quarto": 3,
+    "quinto": 4,
+    "sexto": 5,
+    "sétimo": 6,
+    "oitavo": 7,
+    "nono": 8,
+    "décimo": 9
+}
+
+def extract_page_and_paragraph(answer_text):
+    """
+    Extract page number and paragraph index from answer text.
+    Returns (page, paragraph_index) or (None, None) if not found.
+    """
+    # Buscar página
+    page_match = re.search(r'[Pp]agina\s+(\d+)', answer_text)
+    if not page_match:
+        return None, None
+    page = int(page_match.group(1))
+
+    # Buscar descrição do parágrafo
+    # Expressão regular para capturar palavras como "primeiro", "segundo", "terceiro", "quarto", "quinto", "sexto", "sétimo", "oitavo", "nono", "décimo"
+    para_match = re.search(r'\b(primeiro|segundo|terceiro|quarto|quinto|sexto|sétimo|oitavo|nono|décimo)\s+paragrafo', answer_text.lower())
+    if para_match:
+        ordinal = para_match.group(1)
+        para_index = ordinal_to_index.get(ordinal, 0)
+    else:
+        # Se não encontrar ordinal, tenta algo como "4 paragrafo" (número)
+        num_match = re.search(r'(\d+)\s+paragrafo', answer_text.lower())
+        if num_match:
+            para_index = int(num_match.group(1)) - 1  # 1-based to 0-based
+        else:
+            # fallback: assume primeiro parágrafo
+            para_index = 0
+
+    return page, para_index
+
+# Gerar anotações no formato JSONL
+annotations = []
+for item in qa_pairs:
+    question = item["question"]
+    answer = item["answer"]
+    page, para_idx = extract_page_and_paragraph(answer)
+    if page is None:
+        print(f"Aviso: não foi possível extrair página da resposta para: {question[:50]}...")
+        continue
+    annotations.append({
+        "question": question,
+        "page": page,
+        "paragraph": para_idx
+    })
+
+# Caminho de saída (ajuste conforme desejar)
+output_path = "/content/drive/MyDrive/UC15/annotations.jsonl"
+
+# Salvar arquivo
+with open(output_path, "w", encoding="utf-8") as f:
+    for ann in annotations:
+        f.write(json.dumps(ann, ensure_ascii=False) + "\n")
+
+print(f"Arquivo de anotações salvo em: {output_path}")
+print(f"Total de anotações: {len(annotations)}")
