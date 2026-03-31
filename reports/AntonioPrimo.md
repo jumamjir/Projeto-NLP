@@ -2028,3 +2028,152 @@ with open(output_path, "w", encoding="utf-8") as f:
 
 print(f"Arquivo de anotações salvo em: {output_path}")
 print(f"Total de anotações: {len(annotations)}")
+
+
+### 2026-03-31
+
+Inicio script para fine tunning do Serafim - 100 mm.
+a) Rodar no docker. Segue código:
+import logging
+import traceback
+from datasets import load_dataset
+from sentence_transformers.cross_encoder import (
+    CrossEncoder,
+    CrossEncoderTrainer,
+    CrossEncoderTrainingArguments,
+)
+from sentence_transformers.cross_encoder.losses import CachedMultipleNegativesRankingLoss
+
+# Tenta importar BatchSamplers de onde estiver disponível
+try:
+    from sentence_transformers.cross_encoder import BatchSamplers
+except ImportError:
+    try:
+        from sentence_transformers.training_args import BatchSamplers
+    except ImportError:
+        BatchSamplers = None
+        logging.warning("BatchSamplers não encontrado; o argumento batch_sampler será ignorado.")
+
+# Configurar logging
+logging.basicConfig(
+    format="%(asctime)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO
+)
+
+# ============================================
+# 1. Carregar o modelo Serafim (português)
+# ============================================
+model_name = "PORTULAN/serafim-100m-portuguese-pt-sentence-encoder"
+model = CrossEncoder(model_name)
+logging.info(f"Modelo carregado: {model_name}")
+logging.info(f"Max length: {model.max_length}")
+logging.info(f"Num labels: {model.num_labels}")
+
+# ============================================
+# 2. Carregar o dataset local (parquet)
+# ============================================
+data_files = "/workspaces/hf_tests/.devcontainer/train-0000-of-0066.parquet"
+dataset = load_dataset("parquet", data_files=data_files, split="train")
+logging.info(f"Dataset carregado: {dataset}")
+
+# Verificar se as colunas estão no formato esperado (query/passage)
+# Se não estiverem, renomeie ou mapeie conforme seu dataset real
+if "query" not in dataset.column_names or "passage" not in dataset.column_names:
+    # Exemplo: se as colunas se chamam 'question' e 'answer', renomeie
+    # dataset = dataset.rename_columns({"question": "query", "answer": "passage"})
+    raise ValueError(
+        "O dataset deve ter colunas 'query' e 'passage' para o MultipleNegativesRankingLoss.\n"
+        "Ajuste os nomes das colunas conforme necessário."
+    )
+
+# Dividir em treino e validação (10% para validação)
+dataset_dict = dataset.train_test_split(test_size=0.1, seed=42)
+train_dataset = dataset_dict["train"]
+eval_dataset = dataset_dict["test"]
+logging.info(f"Treino: {len(train_dataset)} exemplos | Validação: {len(eval_dataset)}")
+
+# ============================================
+# 3. Definir a função de perda (MultipleNegativesRankingLoss)
+# ============================================
+num_rand_negatives = 5  # Número de negativos aleatórios por par
+loss = CachedMultipleNegativesRankingLoss(
+    model=model,
+    num_negatives=num_rand_negatives,
+    mini_batch_size=32,   # Ajuste conforme sua memória GPU
+)
+
+# ============================================
+# 4. (Opcional) Avaliador – pode ser None se não houver evaluator para português
+# ============================================
+evaluator = None
+
+# ============================================
+# 5. Argumentos de treinamento
+# ============================================
+run_name = "serafim-pt-reranker"
+args_dict = {
+    "output_dir": f"models/{run_name}",
+    "num_train_epochs": 3,
+    "per_device_train_batch_size": 16,
+    "per_device_eval_batch_size": 16,
+    "learning_rate": 2e-5,
+    "warmup_ratio": 0.1,
+    "fp16": True,        # Desative se GPU não suportar FP16
+    "bf16": False,
+    "eval_strategy": "steps",
+    "eval_steps": 500,
+    "save_strategy": "steps",
+    "save_steps": 500,
+    "save_total_limit": 2,
+    "logging_steps": 100,
+    "logging_first_step": True,
+    "run_name": run_name,
+    "seed": 42,
+}
+# Adiciona batch_sampler apenas se BatchSamplers foi importado com sucesso
+if BatchSamplers is not None:
+    args_dict["batch_sampler"] = BatchSamplers.NO_DUPLICATES
+args = CrossEncoderTrainingArguments(**args_dict)
+
+# ============================================
+# 6. Criar o Trainer e iniciar o treinamento
+# ============================================
+trainer = CrossEncoderTrainer(
+    model=model,
+    args=args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    loss=loss,
+    evaluator=evaluator,
+)
+
+trainer.train()
+
+# ============================================
+# 7. Avaliação final (opcional)
+# ============================================
+if evaluator:
+    evaluator(model)
+
+# ============================================
+# 8. Salvar o modelo final
+# ============================================
+final_output_dir = f"models/{run_name}/final"
+model.save_pretrained(final_output_dir)
+logging.info(f"Modelo salvo em: {final_output_dir}")
+
+# ============================================
+# 9. (Opcional) Enviar para o Hugging Face Hub
+# ============================================
+try:
+    model.push_to_hub(run_name)
+    logging.info(f"Modelo enviado para o Hub com nome: {run_name}")
+except Exception:
+    logging.error(
+        f"Erro ao enviar modelo para o Hub:\n{traceback.format_exc()}\n"
+        f"Para enviar manualmente, use:\n"
+        f"  from sentence_transformers.cross_encoder import CrossEncoder\n"
+        f"  model = CrossEncoder('{final_output_dir}')\n"
+        f"  model.push_to_hub('{run_name}')"
+    )
