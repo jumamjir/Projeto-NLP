@@ -206,3 +206,9 @@ sudo rm /etc/apparmor.d/firefox
 * CrossEncoder usado: `PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir`
 * [Dataset](https://drive.google.com/drive/folders/1W4i8UayZiWP7MlZm9YbKOgr3meWEEMxA)
 * Executar primeiro em container local e depois na VM/Colab
+
+### 2026-03-31
+
+* Executado o código de ontem na máquina local com estimativa de mais de 500h pra finalizar o treinamento
+* Executado o código de ontem na VM com estimativa de mais de 2.5h pra finalizar o treinamento
+ 
