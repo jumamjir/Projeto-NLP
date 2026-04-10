@@ -228,3 +228,15 @@ sudo rm /etc/apparmor.d/firefox
 ### 2026-04-07
 
 * Criado notebook para processar o PDF usando LangChain com RAG consultando no VLLM
+
+### 2026-04-08 
+
+* Revisão do código
+
+### 2026-04-09
+
+* Estudo sobre RAG e outras abordagens para NLP
+
+### 2026-04-10
+
+* Introdução à quantização
