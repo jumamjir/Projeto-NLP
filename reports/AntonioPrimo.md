@@ -2323,3 +2323,10 @@ trainer.train()
 final_output_dir = f"models/{run_name}/final"
 model.save_pretrained(final_output_dir)
 logging.info(f"✅ Modelo salvo em: {final_output_dir}")
+
+
+### 2026-04-09 e 2026-04-07
+
+Desenvolvimento codigo integraçao IR + LLM.
+
+

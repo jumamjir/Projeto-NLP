@@ -64,3 +64,6 @@ Rodei o modelo usando o codigo que o professor passou na VM
 
 ### 2026-04-07
 Instalaçao vLLM, falta integrar com fast api 
+
+### 2026-04-09
+Integração com fast api sendo feita, Weverton já fez e esta testando o modelo. ate agora o resultado é satisfatório.
