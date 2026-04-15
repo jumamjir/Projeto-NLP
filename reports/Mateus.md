@@ -70,3 +70,6 @@ Integração com fast api sendo feita, Weverton já fez e esta testando o modelo
 
 ### 2026-04-13
 falta rodar o codigo e pesquisei sobre o que o professor passou na aula.
+
+### 2026-04-14
+revisão do codigo
