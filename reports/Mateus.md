@@ -67,3 +67,12 @@ Instalaçao vLLM, falta integrar com fast api
 
 ### 2026-04-09
 Integração com fast api sendo feita, Weverton já fez e esta testando o modelo. ate agora o resultado é satisfatório.
+
+### 2026-04-13
+falta rodar o codigo e pesquisei sobre o que o professor passou na aula.
+
+### 2026-04-14
+revisão do codigo
+
+### 2026-04-16
+fazendo testes
