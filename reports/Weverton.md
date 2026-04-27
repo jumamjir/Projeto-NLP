@@ -262,3 +262,8 @@ sudo rm /etc/apparmor.d/firefox
 
 * Apresentação de processamento de áudio com IA
 * Modelo referência: Whisper
+
+### 2026-04-23
+
+* Implementação de código para fazer STT.
+  * Foram realizados testes com dataset de treinamento, áudio MP3 e áudio OGG
