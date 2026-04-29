@@ -267,3 +267,15 @@ sudo rm /etc/apparmor.d/firefox
 
 * Implementação de código para fazer STT.
   * Foram realizados testes com dataset de treinamento, áudio MP3 e áudio OGG
+
+### 2026-04-24
+
+* Devido à participação do professor em evento do Senac em Anápolis, a aula foi remota e assíncrona
+
+### 2026-04-27
+
+* Iniciada criação de solução com API para responder a perguntas sobre o TCC tanto via texto quanto via áudio
+
+### 2026-04-28
+
+* Iniciada criação de frontend para consumir a API de ontem
